@@ -1,0 +1,10 @@
+package = libpng
+
+headers = png.h
+headerFilter = png.h
+
+compilerOpts.osx = -I/usr/local/include
+compilerOpts.linux = -I/usr/include/libpng
+
+linkerOpts.osx = -L/usr/local/lib -lpng
+linkerOpts.linux = -L/usr/lib/x86_64-linux-gnu -lpng
