@@ -8,7 +8,7 @@ import copengl.GLuintVar
 import copengl.glDrawPixels
 import kotlinx.cinterop.*
 
-class Texture(private var width: Int, private val height: Int, private val format: UInt, private val filter: UInt = GL_NEAREST, private val wrap: UInt = GL_CLAMP_TO_EDGE) {
+open class Texture(private var width: Int, private val height: Int, private val format: UInt, private val filter: UInt = GL_NEAREST, private val wrap: UInt = GL_CLAMP_TO_EDGE) {
     private var internalId: UInt? = null
     private var imGuiTexture: ImTextureID? = null
 
@@ -30,8 +30,6 @@ class Texture(private var width: Int, private val height: Int, private val forma
 
     fun destroy() {
         if (internalId != null) glDeleteTexture(internalId!!)
-        internalId = null
-        imGuiTexture = null
     }
 
     fun setImage(data: UByteArray) {

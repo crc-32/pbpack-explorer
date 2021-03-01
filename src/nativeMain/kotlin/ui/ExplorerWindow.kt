@@ -1,6 +1,5 @@
 package ui
 
-import cimgui.internal.igCalcTextSize
 import com.imgui.*
 import com.imgui.impl.ImGuiGlfw
 import com.imgui.impl.ImGuiOpenGL3
@@ -9,13 +8,16 @@ import com.kgl.glfw.Window
 import com.kgl.opengl.*
 import formats.PDCData
 import formats.PNGData
+import gl.Checkerboard
 import gl.PDCPainter
 import gl.Texture
 import gl.extensions.toRGBATexture
-import kotlinx.cinterop.memScoped
+import kotlinx.coroutines.*
 import pbpack.ResourcePack
+import ui.extensions.calcTextSize
 import util.extensions.*
-import kotlin.math.round
+import kotlin.native.concurrent.TransferMode
+import kotlin.native.concurrent.Worker
 
 class ExplorerWindow(var pbpack: ResourcePack? = null) {
 
@@ -24,16 +26,13 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
 
     private val window: Window
     private var stateDirty = true
-    private var tex: MutableMap<Int, Texture> = mutableMapOf()
-    private var pdcsData: MutableMap<Int, PDCData> = mutableMapOf()
-
-    private val cbData = ubyteArrayOf(0xa0u, 0xa0u, 0xa0u, 0xffu, 0xf0u, 0xf0u, 0xf0u, 0xffu,
-                                      0xf0u, 0xf0u, 0xf0u, 0xffu, 0xa0u, 0xa0u, 0xa0u, 0xffu)
-    private val checkerBoard: Texture
+    private val tex: MutableMap<Int, Texture> = mutableMapOf()
+    private val pdcsData: MutableMap<Int, PDCData> = mutableMapOf()
+    private val pngData: MutableMap<Int, PNGData> = mutableMapOf()
 
     private val pdcPainter: PDCPainter
 
-    private val subWindows = mutableListOf<SubWindow>()
+    private val subWindows = mutableMapOf<String, SubWindow>()
 
     init {
         window = Window(1280, 720, "pbpack Explorer")
@@ -47,130 +46,167 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
         ImGui.styleColorsDark()
         glfw = ImGuiGlfw(window, true)
         gl = ImGuiOpenGL3(glslVersion)
-
-        checkerBoard = Texture(2, 2, GL_RGBA, wrap = GL_REPEAT).also {
-            it.setImage(cbData.toUByteArray())
-        }
         pdcPainter = PDCPainter()
 
-        subWindows.add(OpenDialog() {
-            pbpack = ResourcePack(it)
-        })
+        subWindows["open"] = PathDialog(actionBtnName = "Open") {
+            try {
+                pbpack = ResourcePack(it)
+                stateDirty = true
+            } catch (e: Exception) {
+                return@PathDialog e.message?: "Failed"
+            }
+            return@PathDialog null
+        }
     }
 
     private fun getPNG() = pbpack?.resources?.filter { it -> it.data.isPNG() }
     private fun getPDCI() = pbpack?.resources?.filter { it -> it.data.isPDCI() }
     private fun getPDCS() = pbpack?.resources?.filter { it -> it.data.isPDCS() }
 
-    private fun resourceGridItem(index: Int, texture: Texture) = with(ImGui) {
+    private fun resourceGridItem(index: Int, texture: Texture, onClick: () -> Unit) = with(ImGui) {
+        var clicked = false
         val scale = texture.getDimensions()
         val targetMult = (200/scale.y).coerceAtMost(getColumnWidth()/scale.x)
         val size = Vec2(scale.x * targetMult, scale.y * targetMult)
 
         val pos = Vec2((getCursorPosX()+(getColumnWidth()/2))-(size.x/2), getCursorPosY())
-        image(checkerBoard.getImTextureID(), Vec2(getColumnWidth(),200f))
+        image(Checkerboard.getImTextureID(), Vec2(getColumnWidth(),200f))
+        if (isItemClicked()) clicked = true
         val txtY = getCursorPosY()
         setCursorPos(pos)
         image(texture.getImTextureID(), size)
-        val xWidth = memScoped {
-            val pout = ImVec2()
-            igCalcTextSize(pout.ptr, index.toString(), null, false, 0f)
-            return@memScoped pout.x
-        }
+        if (isItemClicked()) clicked = true
+        val xWidth = calcTextSize(index.toString()).x
         setCursorPosX(getCursorPosX() + ((getColumnWidth() / 2) - (xWidth / 2)))
         setCursorPosY(txtY+1)
         text(index.toString())
+        if (isItemClicked()) clicked = true
+
+        if (clicked) onClick()
     }
 
     fun run(): Boolean {
         if (!window.shouldClose) {
-            if (stateDirty) {
-                stateDirty = false
-                getPNG()?.forEach {
-                    val png = PNGData(it.data)
-                    if (tex[it.meta.index] != null) {
-                        tex[it.meta.index]!!.destroy()
-                    }
-                    tex[it.meta.index] = png.getData().toRGBATexture(png.width.toInt(), png.height.toInt())
-                }
-
-                getPDCI()?.forEach {
-                    val pdci = PDCData.fromBytes(it.data)
-                    if (tex[it.meta.index] == null) tex[it.meta.index] = Texture(pdci.viewBox[0].toInt(), pdci.viewBox[1].toInt(), GL_RGBA, GL_LINEAR)
-                    pdcPainter.paint(pdci, tex[it.meta.index]!!)
-                }
-            }
             Glfw.pollEvents()
             gl.newFrame()
             glfw.newFrame()
+            val (display_w, display_h) = window.frameBufferSize
+            glViewport(0, 0, display_w, display_h)
+            glClearColor(0.2f, 0.2f, 0.2f, 1.0f)
+            glClear(GL_COLOR_BUFFER_BIT)
             with(ImGui) {
                 newFrame()
+                if (stateDirty) {
+                    setNextWindowSize(Vec2(200f, 50f), ImGuiCond.Always)
+                    setNextWindowPos(Vec2(
+                            ((Glfw.currentContext?.size?.first!!/2)-(200/2)).toFloat(),
+                            ((Glfw.currentContext?.size?.second!!/2)-(50/2)).toFloat(),
+                    ))
+                    begin("Loading", null, ImGuiWindowFlags.NoSavedSettings or ImGuiWindowFlags.NoMove or ImGuiWindowFlags.NoResize)
+                    text("Loading...")
+                    end()
+                    render()
+                    gl.renderDrawData(getDrawData())
+                    window.swapBuffers()
 
-                // https://github.com/ocornut/imgui/issues/331
-                var open = false
-                mainMenuBar {
-                    menu("File") {
-                        if (menuItem("Open..", "Ctrl+O")) {
-                            open = true
-                        }
-                        if (menuItem("Save", "Ctrl+S", enabled = pbpack != null))   { TODO() }
-                        if (menuItem("Close"))  { return false }
-                    }
-                }
-                if (open) {
-                    openPopup(OpenDialog.ID)
-                }
+                    pngData.clear()
+                    val tmptex = tex.toMap()
+                    tex.clear()
 
-                begin("Pack Browser", null, ImGuiWindowFlags.MenuBar)
-                if(sliderInt("PDC Enhance Level", pdcPainter::enhanceScale, 1, 8)) {
-                    stateDirty = true
+                    getPNG()?.forEach {
+                        pngData[it.meta.index] = PNGData(it.data)
+                        val png = pngData[it.meta.index]!!
+
+                        if (tmptex[it.meta.index] != null) {
+                            tmptex[it.meta.index]!!.destroy()
+                        }
+                        tex[it.meta.index] = png.getData().toRGBATexture(png.width.toInt(), png.height.toInt())
+                    }
+
+                    getPDCI()?.forEach {
+                        val pdci = PDCData.fromBytes(it.data)
+                        if (tex[it.meta.index] == null) tex[it.meta.index] = Texture(pdci.viewBox[0].toInt(), pdci.viewBox[1].toInt(), GL_RGBA, GL_LINEAR)
+                        pdcPainter.paint(pdci, tex[it.meta.index]!!)
+                    }
+
+                    getPDCS()?.forEach {
+                        pdcsData.clear()
+                        pdcsData[it.meta.index] = PDCData.fromBytes(it.data)
+                    }
+                    stateDirty = false
+                    return true
+                } else {
+
+                    // https://github.com/ocornut/imgui/issues/331
+                    var open = false
+                    mainMenuBar {
+                        menu("File") {
+                            if (menuItem("Open..", "Ctrl+O")) {
+                                open = true
+                            }
+                            if (menuItem("Save", "Ctrl+S", enabled = pbpack != null))   { TODO() }
+                            if (menuItem("Close"))  { return false }
+                        }
+                    }
+                    if (open) {
+                        openPopup(PathDialog.ID)
+                    }
+
+                    begin("Pack Browser", null, ImGuiWindowFlags.MenuBar)
+                    if(sliderInt("PDC Enhance Level", pdcPainter::enhanceScale, 1, 8)) {
+                        stateDirty = true
+                    }
+                    tabBar("typeTabs") {
+                        tabItem("PNG") {
+                            columns(5)
+                            var i = 0
+                            getPNG()?.forEach {
+                                if (i % 5 == 0) separator()
+                                resourceGridItem(it.meta.index, tex[it.meta.index]!!) {
+                                    subWindows["res${it.meta.index}"] = PNGViewer("Resource ${it.meta.index}", tex, it.meta.index, pngData) {
+                                        //TODO
+                                    }
+                                }
+                                nextColumn()
+                                i++
+                            }
+                            columns(1)
+                        }
+                        tabItem("PDCI") {
+                            columns(5)
+                            var i = 0
+                            getPDCI()?.forEach {
+                                if (i % 5 == 0) separator()
+                                resourceGridItem(it.meta.index, tex[it.meta.index]!!) {
+
+                                }
+                                nextColumn()
+                                i++
+                            }
+                            columns(1)
+                        }
+                        tabItem("PDCS") {
+                            columns(5)
+                            var i = 0
+                            getPDCS()?.forEach {
+                                if (pdcsData[it.meta.index] == null) pdcsData[it.meta.index] = PDCData.fromBytes(it.data)
+                                val pdcs = pdcsData[it.meta.index]!!
+                                if (tex[it.meta.index] == null) tex[it.meta.index.toInt()] = Texture(pdcs.viewBox[0].toInt(), pdcs.viewBox[1].toInt(), GL_RGBA, GL_LINEAR)
+                                pdcPainter.paint(pdcs, tex[it.meta.index]!!)
+                                if (i % 5 == 0) separator()
+                                resourceGridItem(it.meta.index, tex[it.meta.index]!!) {
+
+                                }
+                                nextColumn()
+                                i++
+                            }
+                            columns(1)
+                        }
+                    }
+                    end()
+                    subWindows.entries.removeAll { it -> it.value.render() == false }
                 }
-                tabBar("typeTabs") {
-                    tabItem("PNG") {
-                        columns(5)
-                        var i = 0
-                        getPNG()?.forEach {
-                            if (i % 5 == 0) separator()
-                            resourceGridItem(it.meta.index, tex[it.meta.index]!!)
-                            nextColumn()
-                            i++
-                        }
-                        columns(1)
-                    }
-                    tabItem("PDCI") {
-                        columns(5)
-                        var i = 0
-                        getPDCI()?.forEach {
-                            if (i % 5 == 0) separator()
-                            resourceGridItem(it.meta.index, tex[it.meta.index]!!)
-                            nextColumn()
-                            i++
-                        }
-                        columns(1)
-                    }
-                    tabItem("PDCS") {
-                        columns(5)
-                        var i = 0
-                        getPDCS()?.forEach {
-                            if (pdcsData[it.meta.index] == null) pdcsData[it.meta.index] = PDCData.fromBytes(it.data)
-                            val pdcs = pdcsData[it.meta.index]!!
-                            if (tex[it.meta.index] == null) tex[it.meta.index.toInt()] = Texture(pdcs.viewBox[0].toInt(), pdcs.viewBox[1].toInt(), GL_RGBA, GL_LINEAR)
-                            pdcPainter.paint(pdcs, tex[it.meta.index]!!)
-                            if (i % 5 == 0) separator()
-                            resourceGridItem(it.meta.index, tex[it.meta.index]!!)
-                            nextColumn()
-                            i++
-                        }
-                        columns(1)
-                    }
-                }
-                end()
-                subWindows.removeAll { it -> it.render() == false }
                 render()
-                val (display_w, display_h) = window.frameBufferSize
-                glViewport(0, 0, display_w, display_h)
-                glClearColor(0.2f, 0.2f, 0.2f, 1.0f)
-                glClear(GL_COLOR_BUFFER_BIT)
                 gl.renderDrawData(getDrawData())
 
                 window.swapBuffers()
@@ -186,7 +222,7 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
         tex.forEach {
             it.value.destroy()
         }
-        checkerBoard.destroy()
+        Checkerboard.destroy()
         pdcPainter.destroy()
         gl.close()
         glfw.close()

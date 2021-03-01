@@ -8,16 +8,16 @@ import util.extensions.isPNG
 class PNGData(raw: ByteArray) {
     var width: UInt = 0u
     var height: UInt = 0u
-    var colorType: PNGColorType = PNGColorType.Gray
+    var colorType: PNGColorType = PNGColorType.Grayscale
     var bitDepth: UByte = 0u
     private var data: UByteArray = ubyteArrayOf()
 
     enum class PNGColorType(val value: Int, val stride: Int) {
-        Gray(PNG_COLOR_TYPE_GRAY, 1),
+        Grayscale(PNG_COLOR_TYPE_GRAY, 1),
         Palette(PNG_COLOR_TYPE_PALETTE, 1),
         RGB(PNG_COLOR_TYPE_RGB, 3),
         RGBA(PNG_COLOR_TYPE_RGB_ALPHA, 4),
-        GrayAlpha(PNG_COLOR_TYPE_GRAY_ALPHA, 2);
+        GrayscaleWithAlpha(PNG_COLOR_TYPE_GRAY_ALPHA, 2);
 
         companion object {
             fun fromValue(value: Int) = values().first { it.value == value }
@@ -49,7 +49,7 @@ class PNGData(raw: ByteArray) {
                 png_set_expand(readPtr)
                 if (initColorType == PNGColorType.Palette) {
                     png_set_palette_to_rgb(readPtr)
-                } else if (initColorType == PNGColorType.Gray) {
+                } else if (initColorType == PNGColorType.Grayscale) {
                     png_set_expand_gray_1_2_4_to_8(readPtr)
                 }
                 if (png_get_valid(readPtr, infoPtr, PNG_INFO_tRNS) != 0u) {
@@ -78,13 +78,13 @@ class PNGData(raw: ByteArray) {
                     for (x in 0 until width.toInt()) {
                         val pixel = (row!! + x*colorType.stride)
                         when (colorType) {
-                            PNGColorType.Gray -> {
+                            PNGColorType.Grayscale -> {
                                 data[i+0] = pixel!![0]
                                 data[i+1] = pixel[0]
                                 data[i+2] = pixel[0]
                                 data[i+3] = 0xFFu
                             }
-                            PNGColorType.GrayAlpha -> {
+                            PNGColorType.GrayscaleWithAlpha -> {
                                 data[i+0] = pixel!![0]
                                 data[i+1] = pixel[0]
                                 data[i+2] = pixel[0]
