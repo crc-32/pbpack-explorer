@@ -5,7 +5,7 @@ import platform.posix.fclose
 import platform.posix.fmemopen
 import util.extensions.isPNG
 
-class PNGData(raw: ByteArray) {
+class PNGData(val raw: ByteArray) {
     var width: UInt = 0u
     var height: UInt = 0u
     var colorType: PNGColorType = PNGColorType.Grayscale

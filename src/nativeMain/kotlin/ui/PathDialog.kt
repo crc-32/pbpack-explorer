@@ -9,8 +9,9 @@ import platform.posix.err
 import platform.posix.getenv
 import ui.extensions.calcTextSize
 
-class PathDialog(initial: String? = null, private val actionBtnName: String, private val cb: (String) -> String?): SubWindow {
+class PathDialog(id: String? = null, initial: String? = null, private val actionBtnName: String, private val cb: (String) -> String?): SubWindow {
     var path = initial?: getHome()
+    override val id = actionBtnName + "##" + (id?: "PathDialog${this.hashCode().toString(16)}")
 
     val buf = ByteArray(1024, {idx -> path.getOrNull(idx)?.toByte()?: 0})
 
@@ -39,7 +40,7 @@ class PathDialog(initial: String? = null, private val actionBtnName: String, pri
                 ((Glfw.currentContext?.size?.first!!/2)-(400/2)).toFloat(),
                 ((Glfw.currentContext?.size?.second!!/2)-(50/2)).toFloat(),
         ))
-        if (beginPopupModal(ID, flags = ImGuiWindowFlags.NoResize or ImGuiWindowFlags.NoTitleBar or ImGuiWindowFlags.NoMove)) {
+        if (beginPopupModal(id, flags = ImGuiWindowFlags.NoResize or ImGuiWindowFlags.NoTitleBar or ImGuiWindowFlags.NoMove)) {
             setNextItemWidth(getWindowWidth())
             if (inputTextWithHint("", "Path", buf)) {
                 path = buf.toKString().replace("~", getHome())
@@ -58,9 +59,5 @@ class PathDialog(initial: String? = null, private val actionBtnName: String, pri
             endPopup()
         }
         return true
-    }
-
-    companion object {
-        const val ID = "Open"
     }
 }

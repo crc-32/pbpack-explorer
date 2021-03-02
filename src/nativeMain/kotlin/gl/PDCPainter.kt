@@ -1,6 +1,8 @@
 package gl
 
+import com.imgui.Vec2
 import com.imgui.Vec4
+import com.kgl.glfw.Glfw
 import com.kgl.opengl.*
 import com.kgl.opengl.glBindTexture
 import com.kgl.opengl.glClear
@@ -37,12 +39,7 @@ class PDCPainter {
     init {
         vertexArrayObj = glGenVertexArray()
         glBindVertexArray(vertexArrayObj)
-
-
-
-        val glslVersionString = "#version 450"
-        val glslVersion = 330
-
+        /*val glslVersionString = "#version 450"
         val vertexShader = """
             uniform vec2 Viewport;
             attribute vec2 Position;
@@ -54,6 +51,23 @@ class PDCPainter {
         val fragmentShader = """
             uniform vec4 UserCol;
             out vec4 color;
+            void main() {
+                color = UserCol;
+            }
+        """.trimIndent()*/
+
+        val glslVersionString = "#version 300 es"
+        val vertexShader = """
+            uniform vec2 Viewport;
+            layout (location = 0) in vec2 Position;
+            
+            void main() {
+                gl_Position = vec4(2.0*Position.xy / Viewport.xy - 1.0, 0.0, 1.0);
+            }
+        """.trimIndent()
+        val fragmentShader = """
+            uniform mediump vec4 UserCol;
+            out mediump vec4 color;
             void main() {
                 color = UserCol;
             }
@@ -95,7 +109,7 @@ class PDCPainter {
         vtxData.usePinned { data ->
             glBufferData(GL_ARRAY_BUFFER, vtxData.size.toLong(), data.addressOf(0), GL_STATIC_DRAW)
             glUniform4f(colorLoc, color.x, color.y, color.z, color.w)
-            glPolygonMode(GL_FRONT_AND_BACK,GL_FILL);
+            glPolygonMode(GL_FRONT_AND_BACK,GL_FILL)
             glDrawArrays(GL_TRIANGLES, 0, vtxCount)
         }
     }
@@ -105,7 +119,7 @@ class PDCPainter {
             vtxData.usePinned {data ->
                 glBufferData(GL_ARRAY_BUFFER, vtxData.size.toLong(), data.addressOf(0), GL_STATIC_DRAW)
                 glUniform4f(colorLoc, color.x, color.y, color.z, color.w)
-                glPolygonMode(GL_FRONT_AND_BACK,GL_LINE);
+                glPolygonMode(GL_FRONT_AND_BACK,GL_LINE)
                 glLineWidth(thickness*enhanceScale)
                 if (!pathOpen) {
                     glDrawArrays(GL_LINE_LOOP, 0, vtxCount)
@@ -116,12 +130,17 @@ class PDCPainter {
         }
     }
 
-    fun paint(pdc: PDCData, texture: Texture) {
-        if (pdc.type == PDCData.Type.Sequence && pdc.lastFrameTime != -1L && getTimeMillis() - pdc.lastFrameTime < pdc.getLastFrame().duration.toLong()) {
+    fun paint(pdc: PDCData, texture: Texture, uv0: Vec2 = Vec2.Zero, uv1: Vec2 = texture.getDimensions(), playing: Boolean = true) {
+        if (pdc.type == PDCData.Type.Sequence && playing && pdc.lastFrameTime != -1L && getTimeMillis() - pdc.lastFrameTime < pdc.getLastFrame().duration.toLong()) {
             return
         }
         pdc.lastFrameTime = getTimeMillis()
-        val frame = pdc.getFrame()
+        val frame = if (playing) {
+            pdc.getFrame()
+        }else {
+            if (pdc.cFrame > pdc.frames.lastIndex) pdc.cFrame = 0
+            pdc.frames[pdc.cFrame]
+        }
 
         glUseProgram(program)
 
@@ -157,7 +176,7 @@ class PDCPainter {
         glClearColor(0f,0f,0f,0f)
         glClear(GL_COLOR_BUFFER_BIT)
 
-        glViewport(0, 0, w.toInt()*enhanceScale, h.toInt()*enhanceScale)
+        glViewport(0+uv0.x.toInt(), 0+uv0.y.toInt(), uv1.x.toInt()*enhanceScale, uv1.y.toInt()*enhanceScale)
 
         frame.commandList.commands.forEach {
             if (it.hidden) return@forEach
@@ -176,7 +195,7 @@ class PDCPainter {
 
                     val path = it.getPath()
                     val points = path.getPoints()
-                    if (!(it.pathOpen ?: false)) {
+                    if (it.pathOpen != true) {
                         val triangles = EarClipper(path).triangulate()
                         fillVtxData = buildList<Byte> {
                             triangles.forEach {
@@ -192,18 +211,18 @@ class PDCPainter {
                         }
                     }.toByteArray()
 
-                    if (!(it.pathOpen ?: false) && fillVtxData?.size?:0 > 0) {
+                    if (it.pathOpen != true && fillVtxData?.size?:0 > 0) {
                         paintVtxDataFill(fillVtxData!!, fillVtxCount, fcol)
                     }
 
-                    paintVtxDataLine(outlineVtxData, path.totalPoints, scol, it.strokeWidth.toFloat(), it.pathOpen?:false)
+                    paintVtxDataLine(outlineVtxData, path.totalPoints, scol, it.strokeWidth.toFloat(), it.pathOpen)
                     glDisableVertexAttribArray(posLocation.toUInt())
                 }
 
                 DrawCommand.Type.Circle -> {
                     for (point in it.points) {
                         val path = VectorPath {
-                            circle(point, it.radius!!.toDouble())
+                            circle(point, it.radius.toDouble())
                             close()
                         }
                         val genPoints = path.getPoints()

@@ -13,7 +13,7 @@ class EarClipper(private val path: VectorPath) {
     }
 
     fun triangulate(): List<IPoint> {
-        require(points.size > 2)
+        if (points.size <= 2) return emptyList()
 
         val triPoints = mutableListOf<IPoint>()
 

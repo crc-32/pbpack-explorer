@@ -15,7 +15,7 @@ data class PDCData(
         var frames: List<Frame>,
         var playCount: UShort
 ) {
-    private var cFrame = 0
+    var cFrame = 0
     var lastFrameTime = -1L
 
     enum class Type(val value: ByteArray) {
@@ -80,7 +80,7 @@ data class PDCData(
 
     fun getFrame(): Frame {
         if (cFrame > frames.lastIndex) cFrame = 0
-        frames[cFrame].duration
+
 
         return frames[cFrame++]
     }

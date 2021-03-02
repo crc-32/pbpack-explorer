@@ -16,8 +16,8 @@ data class DrawCommand(
         var strokeColor: UByte,
         var strokeWidth: UByte,
         var fillColor: UByte,
-        var pathOpen: Boolean? = null,
-        var radius: UShort? = null,
+        var pathOpen: Boolean = false,
+        var radius: UShort = 0u,
         var points: List<Point>
 ) {
     enum class Type(val value: UByte) {
@@ -50,12 +50,10 @@ data class DrawCommand(
         bytes.setUByteAt(n, fillColor)
         n += UByte.SIZE_BYTES
 
-        if (radius != null) {
-            bytes.setUShortAt(n, radius!!)
-        }else if (pathOpen != null) {
-            bytes.setUShortAt(n, (if (pathOpen!!) ATTR_PATH_OPEN else 0u).toUShort())
+        if (type == Type.Circle) {
+            bytes.setUShortAt(n, radius)
         }else {
-            throw IllegalStateException("radius and pathOpen both null")
+            bytes.setUShortAt(n, (if (pathOpen) ATTR_PATH_OPEN else 0u).toUShort())
         }
         n += UShort.SIZE_BYTES
         bytes.setUShortAt(n, points.size.toUShort())
@@ -111,6 +109,7 @@ data class DrawCommand(
             val command = DrawCommand(type, flags and FLAG_HIDDEN.toUByte() > 0u, strokeColor, strokeWidth, fillColor, points = points)
             if (type == Type.Circle) {
                 command.radius = attribute
+                command.pathOpen = false
             }else {
                 command.pathOpen = pathOpen
             }
@@ -131,11 +130,11 @@ data class DrawCommand(
                             lineTo(point.x, point.y)
                     }
                 }
-                if (!pathOpen!!) {
+                if (!pathOpen) {
                     close()
                 }
             } else {
-                circle(points[0].x, points[0].y, radius!!.toDouble())
+                circle(points[0].x, points[0].y, radius.toDouble())
             }
         }
     }

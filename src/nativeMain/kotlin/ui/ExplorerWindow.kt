@@ -11,6 +11,7 @@ import formats.PNGData
 import gl.Checkerboard
 import gl.PDCPainter
 import gl.Texture
+import gl.Textures
 import gl.extensions.toRGBATexture
 import kotlinx.coroutines.*
 import pbpack.ResourcePack
@@ -26,8 +27,8 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
 
     private val window: Window
     private var stateDirty = true
-    private val tex: MutableMap<Int, Texture> = mutableMapOf()
     private val pdcsData: MutableMap<Int, PDCData> = mutableMapOf()
+    private val pdciData: MutableMap<Int, PDCData> = mutableMapOf()
     private val pngData: MutableMap<Int, PNGData> = mutableMapOf()
 
     private val pdcPainter: PDCPainter
@@ -90,8 +91,6 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
             Glfw.pollEvents()
             gl.newFrame()
             glfw.newFrame()
-            val (display_w, display_h) = window.frameBufferSize
-            glViewport(0, 0, display_w, display_h)
             glClearColor(0.2f, 0.2f, 0.2f, 1.0f)
             glClear(GL_COLOR_BUFFER_BIT)
             with(ImGui) {
@@ -110,8 +109,7 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
                     window.swapBuffers()
 
                     pngData.clear()
-                    val tmptex = tex.toMap()
-                    tex.clear()
+                    val tmptex = Textures.copyAndClear()
 
                     getPNG()?.forEach {
                         pngData[it.meta.index] = PNGData(it.data)
@@ -120,17 +118,20 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
                         if (tmptex[it.meta.index] != null) {
                             tmptex[it.meta.index]!!.destroy()
                         }
-                        tex[it.meta.index] = png.getData().toRGBATexture(png.width.toInt(), png.height.toInt())
+                        Textures[it.meta.index] = png.getData().toRGBATexture(png.width.toInt(), png.height.toInt())
                     }
+
+                    pdciData.clear()
+                    pdcsData.clear()
 
                     getPDCI()?.forEach {
                         val pdci = PDCData.fromBytes(it.data)
-                        if (tex[it.meta.index] == null) tex[it.meta.index] = Texture(pdci.viewBox[0].toInt(), pdci.viewBox[1].toInt(), GL_RGBA, GL_LINEAR)
-                        pdcPainter.paint(pdci, tex[it.meta.index]!!)
+                        pdciData[it.meta.index] = pdci
+                        if (Textures[it.meta.index] == null) Textures[it.meta.index] = Texture(pdci.viewBox[0].toInt(), pdci.viewBox[1].toInt(), GL_RGBA, GL_LINEAR)
+                        pdcPainter.paint(pdci, Textures[it.meta.index]!!)
                     }
 
                     getPDCS()?.forEach {
-                        pdcsData.clear()
                         pdcsData[it.meta.index] = PDCData.fromBytes(it.data)
                     }
                     stateDirty = false
@@ -149,7 +150,7 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
                         }
                     }
                     if (open) {
-                        openPopup(PathDialog.ID)
+                        openPopup(subWindows["open"]!!.id)
                     }
 
                     begin("Pack Browser", null, ImGuiWindowFlags.MenuBar)
@@ -162,9 +163,9 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
                             var i = 0
                             getPNG()?.forEach {
                                 if (i % 5 == 0) separator()
-                                resourceGridItem(it.meta.index, tex[it.meta.index]!!) {
-                                    subWindows["res${it.meta.index}"] = PNGViewer("Resource ${it.meta.index}", tex, it.meta.index, pngData) {
-                                        //TODO
+                                resourceGridItem(it.meta.index, Textures[it.meta.index]!!) {
+                                    subWindows["res${it.meta.index}"] = PNGViewer("Resource ${it.meta.index}", it.meta.index, pngData) {
+                                        TODO()
                                     }
                                 }
                                 nextColumn()
@@ -177,8 +178,10 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
                             var i = 0
                             getPDCI()?.forEach {
                                 if (i % 5 == 0) separator()
-                                resourceGridItem(it.meta.index, tex[it.meta.index]!!) {
-
+                                resourceGridItem(it.meta.index, Textures[it.meta.index]!!) {
+                                    subWindows["res${it.meta.index}"] = PDCViewer(pdcPainter, "Resource ${it.meta.index}", it.meta.index, pdciData) {
+                                        TODO()
+                                    }
                                 }
                                 nextColumn()
                                 i++
@@ -191,11 +194,13 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
                             getPDCS()?.forEach {
                                 if (pdcsData[it.meta.index] == null) pdcsData[it.meta.index] = PDCData.fromBytes(it.data)
                                 val pdcs = pdcsData[it.meta.index]!!
-                                if (tex[it.meta.index] == null) tex[it.meta.index.toInt()] = Texture(pdcs.viewBox[0].toInt(), pdcs.viewBox[1].toInt(), GL_RGBA, GL_LINEAR)
-                                pdcPainter.paint(pdcs, tex[it.meta.index]!!)
+                                if (Textures[it.meta.index] == null) Textures[it.meta.index] = Texture(pdcs.viewBox[0].toInt(), pdcs.viewBox[1].toInt(), GL_RGBA, GL_LINEAR)
+                                pdcPainter.paint(pdcs, Textures[it.meta.index]!!)
                                 if (i % 5 == 0) separator()
-                                resourceGridItem(it.meta.index, tex[it.meta.index]!!) {
-
+                                resourceGridItem(it.meta.index, Textures[it.meta.index]!!) {
+                                    subWindows["res${it.meta.index}"] = PDCViewer(pdcPainter, "Resource ${it.meta.index}", it.meta.index, pdcsData) {
+                                        TODO()
+                                    }
                                 }
                                 nextColumn()
                                 i++
@@ -206,6 +211,7 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
                     end()
                     subWindows.entries.removeAll { it -> it.value.render() == false }
                 }
+                getIO().displayFramebufferScale = Vec2(window.contentScale.first, window.contentScale.second)
                 render()
                 gl.renderDrawData(getDrawData())
 
@@ -219,9 +225,7 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
     }
 
     fun cleanup() {
-        tex.forEach {
-            it.value.destroy()
-        }
+        Textures.destroyAll()
         Checkerboard.destroy()
         pdcPainter.destroy()
         gl.close()

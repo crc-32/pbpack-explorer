@@ -1,24 +1,43 @@
 package ui
 
-import com.imgui.ImGui
-import com.imgui.ImGuiCond
-import com.imgui.ImGuiWindowFlags
-import com.imgui.Vec2
+import com.imgui.*
 import formats.PNGData
 import gl.Checkerboard
 import gl.Texture
+import gl.Textures
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.memScoped
+import kotlinx.cinterop.usePinned
+import platform.posix.exp
+import platform.posix.fclose
+import platform.posix.fopen
+import platform.posix.fwrite
 import ui.extensions.calcTextSize
 
-class PNGViewer(private val name: String, private val tex: Map<Int,Texture>, private val index: Int, private val pngData: Map<Int, PNGData>, onOverwrite: (PNGData) -> Unit): SubWindow {
+class PNGViewer(name: String, private val index: Int, private val pngData: Map<Int, PNGData>, onOverwrite: (PNGData) -> Unit): SubWindow {
     var open = true
     var uv0 = Vec2(0f,0f)
     var uv1 = Vec2(1f,1f)
     var wheel = 0f
+    override val id: String = "View PNG: $name"
+    private val exportDialog = PathDialog(actionBtnName = "Export") {
+        memScoped {
+            val file = fopen(it, "w+") ?: return@PathDialog "Couldn't save here"
+            try {
+                pngData[index]!!.raw.usePinned {
+                    fwrite(it.addressOf(0), it.get().size.toULong(), 1, file)
+                }
+            } finally {
+                fclose(file)
+            }
+        }
+        return@PathDialog null
+    }
     override fun render(): Boolean = with(ImGui) {
-        if (tex[index] == null || pngData[index] == null) {
+        if (Textures[index] == null || pngData[index] == null) {
             return false
         }
-        val texture = tex[index]!!
+        val texture = Textures[index]!!
         val png = pngData[index]!!
 
         val scale = texture.getDimensions()
@@ -26,7 +45,20 @@ class PNGViewer(private val name: String, private val tex: Map<Int,Texture>, pri
         val size = Vec2(scale.x * targetMult, scale.y * targetMult)
 
         setNextWindowSize(Vec2(getIO().displaySize.y / 2, size.y + 130), ImGuiCond.Once)
-        begin("View PNG: $name", ::open)
+        begin(id, ::open, ImGuiWindowFlags.NoSavedSettings or ImGuiWindowFlags.MenuBar)
+        var export = false
+        menuBar {
+            menu("File") {
+                if (menuItem("Export PNG...", "Ctrl+E")) {
+                    export = true
+                }
+            }
+        }
+        if (export) {
+            openPopup(exportDialog.id)
+        }
+        exportDialog.render()
+
         val centerPoint = getWindowContentRegionWidth()/2
 
         val pos = Vec2((getCursorPosX()+centerPoint)-(size.x/2), getCursorPosY())
