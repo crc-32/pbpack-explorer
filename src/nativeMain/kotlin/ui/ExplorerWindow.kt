@@ -27,6 +27,7 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
 
     private val window: Window
     private var stateDirty = true
+    private var pdcSupersample = true
     private val pdcsData: MutableMap<Int, PDCData> = mutableMapOf()
     private val pdciData: MutableMap<Int, PDCData> = mutableMapOf()
     private val pngData: MutableMap<Int, PNGData> = mutableMapOf()
@@ -148,15 +149,23 @@ class ExplorerWindow(var pbpack: ResourcePack? = null) {
                             if (menuItem("Save", "Ctrl+S", enabled = pbpack != null))   { TODO() }
                             if (menuItem("Close"))  { return false }
                         }
+                        menu("View") {
+                            if (menuItem("PDC Supersampling", "", pSelected = this@ExplorerWindow::pdcSupersample)) {
+                                if (pdcSupersample) {
+                                    pdcPainter.enhanceScale = 16
+                                    stateDirty = true
+                                }else {
+                                    pdcPainter.enhanceScale = 1
+                                    stateDirty = true
+                                }
+                            }
+                        }
                     }
                     if (open) {
                         openPopup(subWindows["open"]!!.id)
                     }
 
                     begin("Pack Browser", null, ImGuiWindowFlags.MenuBar)
-                    if(sliderInt("PDC Enhance Level", pdcPainter::enhanceScale, 1, 8)) {
-                        stateDirty = true
-                    }
                     tabBar("typeTabs") {
                         tabItem("PNG") {
                             columns(5)

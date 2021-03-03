@@ -2,7 +2,7 @@ package formats.pdc
 
 import kotlin.native.concurrent.MutableData
 
-data class CommandList(val commands: List<DrawCommand>) {
+data class CommandList(var commands: List<DrawCommand>) {
     fun toBytes(): ByteArray {
         return buildList<Byte> {
             val arr = ByteArray(2)

@@ -34,7 +34,7 @@ class PDCPainter {
     private var viewportLoc: Int
     private var posLocation: Int
     private var colorLoc: Int
-    var enhanceScale = 2
+    var enhanceScale = 16
 
     init {
         vertexArrayObj = glGenVertexArray()
@@ -130,7 +130,16 @@ class PDCPainter {
         }
     }
 
-    fun paint(pdc: PDCData, texture: Texture, uv0: Vec2 = Vec2.Zero, uv1: Vec2 = texture.getDimensions(), playing: Boolean = true) {
+    private fun paintVtxDataPoints(vtxData: ByteArray, vtxCount: Int, color: Vec4) {
+        vtxData.usePinned {data ->
+            glBufferData(GL_ARRAY_BUFFER, vtxData.size.toLong(), data.addressOf(0), GL_STATIC_DRAW)
+            glUniform4f(colorLoc, color.x, color.y, color.z, color.w)
+            glPointSize(2f)
+            glDrawArrays(GL_POINTS, 0, vtxCount)
+        }
+    }
+
+    fun paint(pdc: PDCData, texture: Texture, uv0: Vec2 = Vec2.Zero, uv1: Vec2 = texture.getDimensions(), playing: Boolean = true, pointsOnly: Boolean = false) {
         if (pdc.type == PDCData.Type.Sequence && playing && pdc.lastFrameTime != -1L && getTimeMillis() - pdc.lastFrameTime < pdc.getLastFrame().duration.toLong()) {
             return
         }
@@ -211,41 +220,58 @@ class PDCPainter {
                         }
                     }.toByteArray()
 
-                    if (it.pathOpen != true && fillVtxData?.size?:0 > 0) {
-                        paintVtxDataFill(fillVtxData!!, fillVtxCount, fcol)
+                    if (!pointsOnly) {
+                        if (!it.pathOpen && fillVtxData?.size?:0 > 0) {
+                            paintVtxDataFill(fillVtxData!!, fillVtxCount, fcol)
+                        }
                     }
 
-                    paintVtxDataLine(outlineVtxData, path.totalPoints, scol, it.strokeWidth.toFloat(), it.pathOpen)
+                    if (pointsOnly) {
+                        paintVtxDataPoints(outlineVtxData, path.totalPoints, scol)
+                        paintVtxDataLine(outlineVtxData, path.totalPoints, scol.copy(w = 0.5f), 1f, it.pathOpen)
+                    }else {
+                        paintVtxDataLine(outlineVtxData, path.totalPoints, scol, it.strokeWidth.toFloat(), it.pathOpen)
+                    }
+
                     glDisableVertexAttribArray(posLocation.toUInt())
                 }
 
                 DrawCommand.Type.Circle -> {
-                    for (point in it.points) {
-                        val path = VectorPath {
-                            circle(point, it.radius.toDouble())
-                            close()
+                    if (!pointsOnly) {
+                        for (point in it.points) {
+                            val path = VectorPath {
+                                circle(point, it.radius.toDouble())
+                                close()
+                            }
+                            val genPoints = path.getPoints()
+                            var outlineVtxCount = 0
+                            var fillVtxCount = 0
+
+                            val outlineVtxData = buildList<Byte> {
+                                genPoints.forEach {
+                                    addAll(PDCPaintVert(it.x.toFloat(), it.y.toFloat()).toBytes().toList())
+                                    outlineVtxCount++
+                                }
+                            }.toByteArray()
+
+                            val triangles = EarClipper(path).triangulate()
+                            val fillVtxData = buildList<Byte> {
+                                triangles.forEach {
+                                    addAll(PDCPaintVert(it.x.toFloat(), it.y.toFloat()).toBytes().toList())
+                                    fillVtxCount++
+                                }
+                            }.toByteArray()
+
+                            paintVtxDataFill(fillVtxData, fillVtxCount, fcol)
+                            paintVtxDataLine(outlineVtxData, outlineVtxCount, scol, it.strokeWidth.toFloat(), false)
                         }
-                        val genPoints = path.getPoints()
-                        var outlineVtxCount = 0
-                        var fillVtxCount = 0
-
+                    } else {
                         val outlineVtxData = buildList<Byte> {
-                            genPoints.forEach {
+                            it.points.forEach {
                                 addAll(PDCPaintVert(it.x.toFloat(), it.y.toFloat()).toBytes().toList())
-                                outlineVtxCount++
                             }
                         }.toByteArray()
-
-                        val triangles = EarClipper(path).triangulate()
-                        val fillVtxData = buildList<Byte> {
-                            triangles.forEach {
-                                addAll(PDCPaintVert(it.x.toFloat(), it.y.toFloat()).toBytes().toList())
-                                fillVtxCount++
-                            }
-                        }.toByteArray()
-
-                        paintVtxDataFill(fillVtxData, fillVtxCount, fcol)
-                        paintVtxDataLine(outlineVtxData, outlineVtxCount, scol, it.strokeWidth.toFloat(), false)
+                        paintVtxDataPoints(outlineVtxData, it.points.size, scol)
                     }
                 }
 

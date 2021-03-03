@@ -4,12 +4,16 @@ import com.imgui.*
 import com.kgl.opengl.GL_RGBA
 import formats.PDCData
 import formats.PNGData
+import formats.pdc.CommandList
 import formats.pdc.DrawCommand
+import formats.pdc.Frame
 import gl.Checkerboard
 import gl.PDCPainter
 import gl.Texture
 import gl.Textures
 import ui.extensions.calcTextSize
+import ui.extensions.getItemRectMax
+import ui.extensions.getItemRectMin
 import util.extensions.toHostColor
 import kotlin.math.roundToInt
 
@@ -24,6 +28,8 @@ class PDCViewer(private val pdcPainter: PDCPainter, name: String, private val in
     private var playing = true
     private var oldCframe = 0
     private var first = true
+    private var pointsMode = false
+    private var lastHover = -1
 
     override fun render(): Boolean = with(ImGui) {
         if (pdcData[index] == null) {
@@ -39,18 +45,27 @@ class PDCViewer(private val pdcPainter: PDCPainter, name: String, private val in
                 Textures.destroy(texId!!)
             }
             pdc = pdcData[index]!!.copy()
+            playing = pdc!!.frames.size > 1
             texture = Texture(pdc!!.viewBox[0].toInt(), pdc!!.viewBox[1].toInt(), GL_RGBA)
             texId = Textures.allocate(texture)
+            redraw = true
         }
 
         if (playing || oldCframe != pdc!!.cFrame || redraw) {
             redraw = false
-            pdcPainter.paint(pdc!!, texture, uv0 = Vec2(8f, 8f), uv1 = Vec2(texture.getDimensions().x-8f, texture.getDimensions().y-8f), playing = playing)
+            pdcPainter.paint(pdc!!, texture, uv0 = Vec2(8f, 8f), uv1 = Vec2(texture.getDimensions().x-8f, texture.getDimensions().y-8f), playing = playing, pointsOnly = pointsMode)
             oldCframe = pdc!!.cFrame
         }
 
         setNextWindowSize(Vec2(getIO().displaySize.y / 1.25f, getIO().displaySize.y / 1.25f), ImGuiCond.Once)
         begin(id, ::open, ImGuiWindowFlags.NoSavedSettings or ImGuiWindowFlags.MenuBar)
+        menuBar {
+            menu("View") {
+                if (menuItem("Points Display", "Ctrl+Alt+P", pSelected = this@PDCViewer::pointsMode)) {
+                    redraw = true
+                }
+            }
+        }
         columns(2)
         if (first) {
             first = false
@@ -86,6 +101,13 @@ class PDCViewer(private val pdcPainter: PDCPainter, name: String, private val in
         text("Type")
         nextColumn()
         text(pdc!!.type.toString())
+        if (pdc!!.type == PDCData.Type.Sequence) {
+            nextColumn()
+            setCursorPosX(colStart.x)
+            text("Play count")
+            nextColumn()
+            text("${if (pdc!!.playCount == (0xFFFFu).toUShort()) "Infinite (0xFFFF)" else pdc!!.playCount}")
+        }
         columns(1)
         endChild()
         nextColumn()
@@ -93,22 +115,56 @@ class PDCViewer(private val pdcPainter: PDCPainter, name: String, private val in
         pdc!!.frames.forEachIndexed { i, frame ->
             if (collapsingHeader("Frame ${i}", if (pdc!!.frames.size == 1) ImGuiTreeNodeFlags.DefaultOpen else null)) {
                 for (cmdi in 0 until frame.commandList.commands.size) {
+                    var hover = false
                     val cmd = frame.commandList.commands[cmdi]
-                    text("${cmdi}: ${cmd.type}")
-                    if (checkbox("Hidden##${i}-${cmd.hashCode()}", cmd::hidden)) {
-                        redraw = true
+                    pushID("${i}-${cmd.hashCode()}")
+
+                    val split = ImDrawListSplitter()
+                    split.split(getWindowDrawList(), 2)
+                    split.setCurrentChannel(getWindowDrawList(), 1)
+                    group {
+                        dummy(Vec2(getColumnWidth()-getColumnOffset(), 0f))
+
+                        text("${cmdi}: ${cmd.type}")
+                        if (checkbox("Hidden", cmd::hidden)) {
+                            redraw = true
+                        }
+                        if (cmd.type != DrawCommand.Type.Circle) {
+                            if (checkbox("Open", cmd::pathOpen)) {
+                                redraw = true
+                            }
+                        }
+
+                        val fill = cmd.fillColor.toHostColor()
+                        val stroke = cmd.strokeColor.toHostColor()
+                        text("Fill: R${fill.x*255} G${(fill.y*255).roundToInt()} B${(fill.z*255).roundToInt()} A${(fill.w*255).roundToInt()}")
+                        text("Stroke: R${stroke.x*255} G${(stroke.y*255).roundToInt()} B${(stroke.z*255).roundToInt()} A${(stroke.w*255).roundToInt()}")
+                        text("Stroke Width: ${cmd.strokeWidth}")
+                        separator()
                     }
-                    if (cmd.type != DrawCommand.Type.Circle) {
-                        if (checkbox("Open##${i}-${cmd.hashCode()}", cmd::pathOpen)) {
+
+                    val min = getItemRectMin()
+                    val max = getItemRectMax()
+
+                    if (isItemHovered()) hover = true
+
+                    if (hover && !playing) {
+                        split.setCurrentChannel(getWindowDrawList(), 0)
+                        getWindowDrawList().addRectFilled(min, max, getColorU32(ImGuiCol.FrameBgHovered))
+
+                        val pdcTmp = PDCData(PDCData.Type.Image, pdc!!.viewBox, listOf(Frame(0u, CommandList(listOf<DrawCommand>(cmd)))), 0u)
+                        pdcPainter.paint(pdcTmp, texture, uv0 = Vec2(8f, 8f), uv1 = Vec2(texture.getDimensions().x-8f, texture.getDimensions().y-8f), playing = false, pointsOnly = pointsMode)
+                        lastHover = cmd.hashCode()
+                    }else {
+                        if (lastHover == cmd.hashCode()) {
+                            lastHover = -1
                             redraw = true
                         }
                     }
-                    val fill = cmd.fillColor.toHostColor()
-                    val stroke = cmd.strokeColor.toHostColor()
-                    text("Fill: R${fill.x*255} G${(fill.y*255).roundToInt()} B${(fill.z*255).roundToInt()} A${(fill.w*255).roundToInt()}")
-                    text("Stroke: R${stroke.x*255} G${(stroke.y*255).roundToInt()} B${(stroke.z*255).roundToInt()} A${(stroke.w*255).roundToInt()}")
-                    text("Stroke Width: ${cmd.strokeWidth}")
-                    spacing()
+
+                    split.merge(getWindowDrawList())
+
+                    popID()
                 }
             }
         }
